@@ -1,0 +1,230 @@
+
+# Import necessary libraries
+import pandas as pd
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+import matplotlib.pyplot as plt
+import seaborn as sns
+from statsmodels.tsa.seasonal import seasonal_decompose
+from pmdarima import auto_arima
+from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import mean_absolute_percentage_error
+
+
+
+
+# Load the data
+ts = pd.read_csv("daily-minimum-temperatures-in-me.csv")
+#change date column to datetime format and set it as index
+ts["Date"] = pd.to_datetime(ts["Date"])
+ts.set_index("Date", inplace=True)
+#shorten Temperature column label to 'Temp'
+ts = ts.rename(columns={'Daily minimum temperatures in Melbourne, Australia, 1981-1990' : 'Temp'})
+ts.head()
+
+ts.info()
+
+#convert 'Temp' column to float datatype
+ts['Temp'] = ts['Temp'].astype(float)
+
+#Daily minimum temperatures column needs to be converted to float datatype
+#however there are few values that can not be converted to float
+#Identify the values that can not be converted as float
+
+notdigit = ts[~ts['Temp'].str[0].str.isdigit()]
+notdigit
+
+
+#Process the values identified so the column datatype can be converted to float
+
+ts['Temp'] = ts['Temp'].apply(lambda x:x.replace('?', ''))
+ts['Temp'] = ts['Temp'].astype(float)
+
+
+
+ts.info()
+
+
+ts.describe()
+
+#----- Data Visualization -------#
+
+# Line plots of time series
+fig, ax = plt.subplots(figsize=(12,9))
+fig.suptitle('Line Plot of the Time Series Data')
+ts['Temp'].plot(ax=ax)
+plt.show()
+
+
+# Histogram plot of time series
+fig, ax = plt.subplots(figsize=(12,9))
+fig.suptitle('Histogram of the Time Series Data')
+ts['Temp'].hist(ax=ax)
+plt.show()
+
+
+# Density plot of time series
+fig, ax = plt.subplots(figsize=(12,9))
+fig.suptitle('Density Plot of the Time Series Data')
+ts['Temp'].plot(kind='kde', ax=ax)
+plt.show()
+
+# boxplots of time series
+fig, ax = plt.subplots(figsize=(12,9))
+squeezed = ts['Temp'].squeeze()
+sns.boxplot(squeezed.index.year, squeezed, ax=ax)
+plt.show()
+
+#Check for the stationarity of data using adfuller method
+
+from statsmodels.tsa.stattools import adfuller
+def adf_test(dataset):
+     dftest = adfuller(dataset, autolag = 'AIC')
+     adf = dftest[0]
+     pvalue = dftest[1]
+     critical_value = dftest[4]['5%']
+     print("1. ADF : ",dftest[0])
+     print("2. P-Value : ", dftest[1])
+     print("3. Num Of Lags : ", dftest[2])
+     print("4. Num Of Observations Used For ADF Regression:",      dftest[3])
+     print("5. Critical Values :")
+     for key, val in dftest[4].items():
+         print("\t",key, ": ", val)
+     if (pvalue < 0.05) and (adf < critical_value):
+        print('The series is stationary')
+     else:
+        print('The series is NOT stationary')
+        
+adf_test(ts)
+
+#--To determine the best seasonal and non-seasonal order for our ARIMA model, 
+#--we will now plot the autocorrelation and partial autocorrelation plots:
+
+plt.figure(figsize=(12,8))
+plot_acf(ts["Temp"], lags=30)
+plt.show()
+
+plt.figure(figsize=(12,8))
+plot_pacf(ts["Temp"], lags=30)
+plt.show()
+
+#From the plot, we can see that the data has a clear seasonality with a period of 365 (daily data) and a decreasing trend.
+#perform a decomposition of the time series data to determine the trend, seasonality, and residual components.
+from statsmodels.tsa.seasonal import seasonal_decompose
+decomposition = seasonal_decompose(ts["Temp"], period=365)
+
+# Plot the decomposition
+plt.figure(figsize=(12,8))
+plt.subplot(311)
+plt.plot(decomposition.trend, label='Trend')
+plt.legend(loc='best')
+plt.subplot(312)
+plt.plot(decomposition.seasonal,label='Seasonality')
+plt.legend(loc='best')
+plt.subplot(313)
+plt.plot(decomposition.resid, label='Residuals')
+plt.legend(loc='best')
+plt.tight_layout()
+plt.show()
+
+# As the series is stationary without differencing,non-seasoanl order: d=0;
+# From ACF and PACF plots, nonseasonal order, p=1, q=1;
+# Based on the decomposed plots, we can see that the seasonal order is (0,1,1,365)
+
+#create a SARIMA Model
+model = SARIMAX(ts["Temp"], order=(1,0,1), seasonal_order=(0,1,1,365))
+model_fit = model.fit()
+
+#Since it is taking much longer time to model with larger data, we will resample data. Resampling to weekly data also making modeling computations complex.
+
+# Resampling the time series into monthly average for the ease of modeling
+resample = ts.resample('M')
+ts = resample.mean()
+ts.head()
+
+ts.plot(figsize=(12,5))
+
+#Check for the stationarity of data using adfuller method
+
+from statsmodels.tsa.stattools import adfuller
+def adf_test(dataset):
+     dftest = adfuller(dataset, autolag = 'AIC')
+     adf = dftest[0]
+     pvalue = dftest[1]
+     critical_value = dftest[4]['5%']
+     print("1. ADF : ",dftest[0])
+     print("2. P-Value : ", dftest[1])
+     print("3. Num Of Lags : ", dftest[2])
+     print("4. Num Of Observations Used For ADF Regression:",      dftest[3])
+     print("5. Critical Values :")
+     for key, val in dftest[4].items():
+         print("\t",key, ": ", val)
+     if (pvalue < 0.05) and (adf < critical_value):
+        print('The series is stationary')
+     else:
+        print('The series is NOT stationary')
+        
+adf_test(ts)
+
+#differencing once and checking if stationary
+adf_test(ts.diff().dropna())
+
+#--To determine the best seasonal and non-seasonal order for our ARIMA model, 
+#--we will now plot the autocorrelation and partial autocorrelation plots:
+
+plt.figure(figsize=(12,8))
+plot_acf(ts["Temp"], lags=30)
+plt.show()
+
+plt.figure(figsize=(12,8))
+plot_pacf(ts["Temp"], lags=30)
+plt.show()
+
+
+#From the plot, we can see that the data has a clear seasonality with a period of 365 (daily data) and a decreasing trend.
+#perform a decomposition of the time series data to determine the trend, seasonality, and residual components.
+from statsmodels.tsa.seasonal import seasonal_decompose
+decomposition = seasonal_decompose(ts["Temp"], period=52)
+
+# Plot the decomposition
+plt.figure(figsize=(12,8))
+plt.subplot(311)
+plt.plot(decomposition.trend, label='Trend')
+plt.legend(loc='best')
+plt.subplot(312)
+plt.plot(decomposition.seasonal,label='Seasonality')
+plt.legend(loc='best')
+plt.subplot(313)
+plt.plot(decomposition.resid, label='Residuals')
+plt.legend(loc='best')
+plt.tight_layout()
+plt.show()
+
+#we will create an ARIMA model with the best seasonal and non-seasonal order. 
+#We will use the auto_arima() function from the pmdarima library to find the best parameters for our model.
+
+model = auto_arima(ts['Temp'], seasonal=True, m=12)
+
+#Split data into train and set in 80:20 ratio. i.e, 8 years data as train data and 2 years data as test data
+train_ts = ts[ts.index < '1989-01-01']
+test_ts = ts[ts.index >= '1989-01-01']
+
+model.fit(train_ts['Temp'])
+
+predictions = model.predict(n_periods=len(test_ts))
+
+plt.figure(figsize=(12,5))
+plt.plot(test_ts.index, predictions, label='Predicted')
+plt.plot(test_ts.index, test_ts['Temp'], label='Actual')
+plt.xlabel('Year')
+plt.ylabel('Temperature')
+plt.title('ARIMA Model Validation')
+plt.legend()
+plt.show()
+
+mae = mean_absolute_error(test_ts['Temp'], predictions)
+print("Mean Absolute Error: ", mae)
+
+
+mape = mean_absolute_percentage_error(test_ts['Temp'], predictions)
+print("Mean Absolute Percentage Error: ", mape)
